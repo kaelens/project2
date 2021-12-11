@@ -65,6 +65,8 @@ og_data <- og_data %>% na.omit()
 # female = 1 and male = 0
 data_adj <- og_data %>% mutate(gender = ifelse(gender == "female", 1, 0))
 
+# rename the first column
+names(data_adj)[1] <- "Student"
 ```
 
 ### Cluster Analysis
@@ -243,24 +245,22 @@ mean(diags)
 library(reticulate)
 #py_install("pandas")
 #py_install("scikit-learn")
+#py_install(packages = "matplotlib")
 use_python("/usr/bin/python3", required = F)
 ```
 
 ```{python}
-import pandas as pd
-from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
 
 college_data = r.data_adj
-#college = pd.read_csv("CollegeDistance.csv")
+college_data = college_data.filter(["Student", "gender", "score", "distance"])
+college_data = college_data.iloc[:500, :]
 
-kmeans = KMeans(n_clusters = 2)
-y_means = kmeans.fit_predict(college_data)
-
-plt.scatter(college_data["gender"], college_data["score"], c=y_means, cmap="rainbow")
+plt.scatter(college_data["Student"], college_data["score"], c=college_data["distance"], cmap="rainbow")
 plt.show()
 ```
 
-  In this python script, I conducted a k-means clustering and plot every student's gender and their respective scores and colored them by the clusters. I thought it would be interesting to see the differences!
+  In this python script, I plot the first 500 students scores and colour by their disatnces from a 4-year college. I thought it would be interesting to see what matplot would provide in terms of graphs and some of the patterns found in the plot were actually pretty neat!
 
 ### Concluding Remarks
 

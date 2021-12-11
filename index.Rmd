@@ -46,93 +46,224 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Kaelen Saythongkham kps827
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+  The dataset I am working with for this project is the College Distance dataset. It contains the gender of the student, their highest test score, the country unemployment rate in 1980, the state hourly wage in manufacturing in 1980, their distance from 4-year college (in 10 miles), and the average state 4-year college tuition (in 1000 USD). 
+    I found this dataset using this list: https://vincentarelbundock.github.io/Rdatasets/datasets.html from the instructions. 
+    The gender variable is measuring the gender of the student. The highest test score variable is measuring their base year composite test score from an administered achievement tests. The distance variable measures the distance of their home from a 4-year college. The tuition variable measures the cost of their state's average cost of 4-year college tuition.
+    The is a total of 4740 observations for each group.
+    
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
 
-# if your dataset needs tidying, do so here
+og_data <- read_csv("./CollegeDistance.csv")
+og_data <- og_data %>% na.omit()
 
-# any other code here
+# female = 1 and male = 0
+data_adj <- og_data %>% mutate(gender = ifelse(gender == "female", 1, 0))
+
 ```
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
-```
+library(GGally)
 
-Discussion of clustering here
-    
+data_select <- data_adj %>% select(score, distance, tuition, education)
+
+sil_width <- vector()
+for (i in 2:10) {
+  pam_fit <- pam(data_select, k = i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+ggplot() + geom_line(aes(x = 1:10, y = sil_width)) + scale_x_continuous(name="k", breaks = 1:10)
+# it seems like k = 2 would be the best number of clusters
+
+# 2. running the PAM clustering algo on raw data for 2 clusters
+data_pam <- data_select %>% pam(2)
+data_pam
+plot(data_pam, which = 2)
+
+data_select %>% mutate(cluster=factor(data_pam$clustering)) %>% ggpairs(cols= 1:4, aes(color=cluster))
+```
+  
+  In terms of overall average silhouette width, the cluster is not very weak, but it is not strong either. It seems that student 2708 and student 2660 are the medoids or the representatives of their respective clusters. They seem the most similar on distance and tuition, but vary on their scores and education levels.
+  
+  The two clusters seem similar in size and silhouette width, which makes sense as the tuition and distance variables are not unique to one student.I believe the cluster solution could be better, but with the current data, the solution fits as well as we can hope for the data.
+  
+  I would like to highlight that it seems that the clusters were separated by score, as we can see by the various pairwise combinations of the variables. It is interesting, but it makes sense as scores seem to be the only variable which the student has the ability to control, compared to their education level, average tuition in their state, and their distance from a 4-year college. I thought it was an interesting outcome.
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
-```
+data_select <- data_adj %>% select(score, distance, tuition, education)
 
-Discussions of PCA here. 
+princomp(data_select, cor=T) -> pca1
+eigval <- pca1$sdev^2
+varprop = round(eigval/sum(eigval), 2)
+
+ggplot() + geom_bar(aes(y = varprop, x=1:4), stat="identity") + geom_text(aes(label = ..count..), stat = "count", color="white") + scale_y_continuous(labels=scales::percent)
+summary(pca1, loadings=T)
+```
+  
+  PC1 captures the trade-off between score, tuition, and education to distance, PC2 highlights the trade-off between score, distance, and education to tuition, PC3 highlights the trade-off between score, distance, and tuition to education, while PC4 emphasizes the trade-off between score to tuition and education.
+  
+  Scoring high on PC1 means you have a higher score, a higher tuition rate, and higher education level, but scoring low means you have a farther distance from a 4-year college and lower rates on other categories.
+  Scoring high on PC2 means you have a higher score, a farther distance from a 4-year college, and a higher education level, while scoring low means you have a higher tuition rate and lower rates on other categories.
+  Scoring high on PC3 means you have a higher score, a farther distance, and a higher tuition rate, while scoring low means you have a higher education level and lower rates on other categories.
+  Scoring high on PC4 means you have a higher score, while scoring low means you have a higher tuition rate and a higher education level and lower scores.
+
+  In this case, we would only want to keep PC1, PC2, and PC3, which we can see explains 86.90081% of the total variance in the college dataset.
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+logistic_fit <- glm(gender=="female" ~ score + distance + tuition, data=og_data, family="binomial")
+
+prob_reg <- predict(logistic_fit, type="response")
+class_diag(prob_reg, truth=og_data$gender, positive="female")
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+set.seed(1234)
+k=10
+
+data<-sample_frac(og_data) #randomly order rows
+folds <- rep(1:k, length.out=nrow(data)) #create folds
+
+diags<-NULL
+for(i in 1:k){
+# create training and test sets
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$gender
+
+# train model
+fit <- glm(gender=="female" ~ score + distance + tuition, data=train, family="binomial")
+
+# test model
+probs <- predict(fit, newdata=test, type="response")
+
+# get performance metrics for each fold
+diags<-rbind(diags,class_diag(probs,truth, positive="female")) }
+
+#average performance metrics across all folds
+summarize_all(diags,mean)
 ```
 
-Discussion here
+  The model is not great, but about average at predicting new observations per CV AUC. The AUC of the linear classifier was 0.5624, while the AUC of the model was 0.55687. There is a slight difference which may hint at some overfitting, but the difference is so small (0.00553) that I would say there are no obvious signs of overfitting.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+knn_fit <- knn3(gender=="female" ~ score + distance + tuition, data=og_data)
+
+prob_knn <- predict(knn_fit, og_data)[,2]
+class_diag(prob_knn, truth=og_data$gender, positive="female")
 ```
 
 ```{R}
-# cross-validation of np classifier here
+set.seed(1234)
+k=10
+
+data<-sample_frac(og_data) #randomly order rows
+folds <- rep(1:k, length.out=nrow(data)) #create folds
+
+diags<-NULL
+for(i in 1:k){
+# create training and test sets
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$gender
+
+# train model
+fit <- knn3(gender=="female" ~ score + distance + tuition, data=train)
+
+# test model
+probs <- predict(fit, newdata=test)[,2]
+
+# get performance metrics for each fold
+diags<-rbind(diags,class_diag(probs,truth, positive="female")) 
+}
+
+#average performance metrics across all folds
+summarize_all(diags,mean)
 ```
 
-Discussion
-
+  The model is not great, but about average at predicting new observations per CV AUC. It seems that it performed worse than the model for the linear classifier by about 0.04242, which is interesting. So it seems that it underperformed by a slight margin. The AUC of the non-parametric classifier was 0.6976, while the AUC of the model was 0.51445. This difference is much larger (0.18315) and would infer that over-fitting may be occurring in the model and could be a slight problem.
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+# predict scores using distance and tuition
+fit <- lm(score ~ distance + tuition + education, data=og_data)
+yhat <- predict(fit)
+
+mse <- mean((og_data$score - yhat)^2)
+mse
 ```
 
 ```{R}
-# cross-validation of regression model here
+set.seed(1234)
+k=10
+
+data<-sample_frac(og_data) #randomly order rows
+folds <- rep(1:k, length.out=nrow(data)) #create folds
+
+diags<-NULL
+for(i in 1:k){
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+
+# fit linear regression model to training set
+fit <- lm(score ~ distance + tuition + education, data=train)
+
+# get predictions/yhats on test set
+yhat <- predict(fit, newdata=test)
+
+# compute prediction error (MSE)
+diags<-mean((test$score-yhat)^2)
+}
+
+#average MSE across all folds
+mean(diags)
 ```
 
-Discussion
+  The MSE of the linear regression model is 58.36751, while the MSE of the model is 56.21403. Since the difference is about 2.15348, this hints that there may be some slight over-fitting occurring, but it would not be obvious enough to affect the total performance. It seems that the model would be pretty accurate at making predictions on new data, but with some slight variance. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+#py_install("pandas")
+#py_install("scikit-learn")
+use_python("/usr/bin/python3", required = F)
 ```
 
 ```{python}
-# python code here
+import pandas as pd
+from sklearn.cluster import KMeans
+
+college_data = r.data_adj
+#college = pd.read_csv("CollegeDistance.csv")
+
+kmeans = KMeans(n_clusters = 2)
+y_means = kmeans.fit_predict(college_data)
+
+plt.scatter(college_data["gender"], college_data["score"], c=y_means, cmap="rainbow")
+plt.show()
 ```
 
-Discussion
+  In this python script, I conducted a k-means clustering and plot every student's gender and their respective scores and colored them by the clusters. I thought it would be interesting to see the differences!
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
-
-
-
+  Overall, this analysis was pretty interesting. I initially chose this dataset because it had some interesting variables that were not unique to any student and I wanted to see how that would affect the data. It was interesting seeing the model attempt to predict the gender of a student solely based on their locations (as distance and tuition were based on location) and their score on an achievement test and I would say that I was surprised on some of the outcomes.
+  
+  Although I did not have any hard hitting conclusions or as many pretty graphs as I did in the last project, I have definitely learned a lot about analysis with this project and see the value of each of these analyses!
